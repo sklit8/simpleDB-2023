@@ -4,11 +4,14 @@ import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
 import simpledb.common.DeadlockException;
+import simpledb.transaction.LockManager;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
+import simpledb.util.LruCache;
 
 import java.io.*;
 
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -33,6 +36,10 @@ public class BufferPool {
     constructor instead. */
     public static final int DEFAULT_PAGES = 50;
 
+    private final LruCache<PageId, Page> lruCache;
+
+    private final LockManager lockManager;
+
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
@@ -40,6 +47,8 @@ public class BufferPool {
      */
     public BufferPool(int numPages) {
         // some code goes here
+        this.lruCache = new LruCache<>(numPages);
+        this.lockManager = new LockManager();
     }
     
     public static int getPageSize() {
@@ -74,9 +83,29 @@ public class BufferPool {
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
-        return null;
+        final int lockType = perm == Permissions.READ_ONLY ? 0 : 1;
+        final int timeout = new Random().nextInt(2000) + 1000;
+        if(!this.lockManager.tryAcquireLock(pid,tid,lockType,timeout)){
+            throw new TransactionAbortedException();
+        }
+        final Page page = this.lruCache.get(pid);
+        if(page != null){
+            return page;
+        }
+        return loadPageAndCache(pid);
     }
 
+    private Page loadPageAndCache(final PageId pid) throws DbException {
+        final DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
+        final Page dbPage = dbFile.readPage(pid);
+        if (dbPage != null) {
+            this.lruCache.put(pid, dbPage);
+            if (this.lruCache.getSize() == this.lruCache.getMaxSize()) {
+                evictPage();
+            }
+        }
+        return dbPage;
+    }
     /**
      * Releases the lock on a page.
      * Calling this is very risky, and may result in wrong behavior. Think hard
@@ -89,6 +118,7 @@ public class BufferPool {
     public  void unsafeReleasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for lab1|lab2
+        this.lockManager.releaseLock(pid,tid);
     }
 
     /**
@@ -105,7 +135,7 @@ public class BufferPool {
     public boolean holdsLock(TransactionId tid, PageId p) {
         // some code goes here
         // not necessary for lab1|lab2
-        return false;
+        return this.lockManager.holds(p,tid);
     }
 
     /**
