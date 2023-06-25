@@ -1,6 +1,6 @@
 package simpledb.common;
 
-import simpledb.common.Type;
+
 import simpledb.storage.DbFile;
 import simpledb.storage.HeapFile;
 import simpledb.storage.TupleDesc;
@@ -10,7 +10,6 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The Catalog keeps track of all available tables in the database and their
@@ -18,10 +17,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * For now, this is a stub catalog that must be populated with tables by a
  * user program before it can be used -- eventually, this should be converted
  * to a catalog that reads a catalog table from disk.
- * 
+ * 目录跟踪数据库中的所有可用表及其关联的架构。
+ * 目前，这是一个存根目录，必须先由用户程序填充表，然后才能使用——最终，它应该转换为从磁盘读取目录表的目录。
+ *
  * @Threadsafe
  */
 public class Catalog {
+    // 维护 tableId -> table 的映射关系
+    private final Map<Integer,TableInfo> tableInfoMap;
+    // 维护 name -> tableId 的映射关系
+    private final Map<String,Integer> nameToIdMap;
 
     /**
      * Constructor.
@@ -29,6 +34,8 @@ public class Catalog {
      */
     public Catalog() {
         // some code goes here
+        this.tableInfoMap = new HashMap<>();
+        this.nameToIdMap = new HashMap<>();
     }
 
     /**
@@ -42,6 +49,10 @@ public class Catalog {
      */
     public void addTable(DbFile file, String name, String pkeyField) {
         // some code goes here
+        final int tableId = file.getId();
+        final TableInfo tableInfo = new TableInfo(tableId,name,file,pkeyField);
+        this.tableInfoMap.put(tableId,tableInfo);
+        this.nameToIdMap.put(name,tableId);
     }
 
     public void addTable(DbFile file, String name) {
@@ -65,7 +76,17 @@ public class Catalog {
      */
     public int getTableId(String name) throws NoSuchElementException {
         // some code goes here
-        return 0;
+        if(!this.nameToIdMap.containsKey(name)){
+            throw new NoSuchElementException();
+        }
+        return this.nameToIdMap.get(name);
+    }
+
+    public TableInfo getTableInfo(int tableId){
+        if (!this.tableInfoMap.containsKey(tableId)) {
+            throw new NoSuchElementException();
+        }
+        return this.tableInfoMap.get(tableId);
     }
 
     /**
@@ -76,6 +97,10 @@ public class Catalog {
      */
     public TupleDesc getTupleDesc(int tableid) throws NoSuchElementException {
         // some code goes here
+        DbFile dbFile = getTableInfo(tableid).getDbFile();
+        if(dbFile != null){
+            return dbFile.getTupleDesc();
+        }
         return null;
     }
 
@@ -87,29 +112,32 @@ public class Catalog {
      */
     public DbFile getDatabaseFile(int tableid) throws NoSuchElementException {
         // some code goes here
-        return null;
+        return getTableInfo(tableid).getDbFile();
     }
 
     public String getPrimaryKey(int tableid) {
         // some code goes here
-        return null;
+        return getTableInfo(tableid).getPrimaryKeyName();
     }
 
     public Iterator<Integer> tableIdIterator() {
         // some code goes here
-        return null;
+        final Set<Integer> ids = this.tableInfoMap.keySet();
+        return ids.iterator();
     }
 
     public String getTableName(int id) {
         // some code goes here
-        return null;
+        return getTableInfo(id).getTableName();
     }
-    
+
     /** Delete all tables from the catalog */
     public void clear() {
         // some code goes here
+        this.tableInfoMap.clear();
+        this.nameToIdMap.clear();
     }
-    
+
     /**
      * Reads the schema from a file and creates the appropriate tables in the database.
      * @param catalogFile
@@ -119,7 +147,7 @@ public class Catalog {
         String baseFolder=new File(new File(catalogFile).getAbsolutePath()).getParent();
         try {
             BufferedReader br = new BufferedReader(new FileReader(catalogFile));
-            
+
             while ((line = br.readLine()) != null) {
                 //assume line is of the format name (field type, field type, ...)
                 String name = line.substring(0, line.indexOf("(")).trim();
