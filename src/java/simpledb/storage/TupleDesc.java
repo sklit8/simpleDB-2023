@@ -200,8 +200,7 @@ public class TupleDesc implements Serializable {
     /**
      * 将指定的对象与此元组描述进行比较以实现相等。如果两个元组具有相同数量的项，
      * 并且此元组描述中的第 i 个类型等于每个 i 的 o 中的第 i 个类型，则认为它们相等
-     * @param o
-     *            the Object to be compared for equality with this TupleDesc.
+     * @param o the Object to be compared for equality with this TupleDesc.
      * @return true if the object is equal to this TupleDesc.
      */
 
