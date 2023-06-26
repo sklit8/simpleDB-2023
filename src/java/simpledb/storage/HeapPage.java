@@ -4,6 +4,7 @@ import simpledb.common.Database;
 import simpledb.common.DbException;
 import simpledb.common.Debug;
 import simpledb.common.Catalog;
+import simpledb.transaction.IteratorWrapper;
 import simpledb.transaction.TransactionId;
 
 import java.util.*;
@@ -73,7 +74,7 @@ public class HeapPage implements Page {
     */
     private int getNumTuples() {        
         // some code goes here
-        return 0;
+        return (BufferPool.getPageSize() * 8) / (td.getSize() * 8 + 1);
 
     }
 
@@ -81,10 +82,9 @@ public class HeapPage implements Page {
      * Computes the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      * @return the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      */
-    private int getHeaderSize() {        
-        
+    private int getHeaderSize() {
         // some code goes here
-        return 0;
+        return (int) Math.ceil(getNumTuples() / 8.0);
                  
     }
     
@@ -118,7 +118,7 @@ public class HeapPage implements Page {
      */
     public HeapPageId getId() {
     // some code goes here
-    throw new UnsupportedOperationException("implement this");
+        return this.pid;
     }
 
     /**
@@ -288,7 +288,13 @@ public class HeapPage implements Page {
      */
     public int getNumEmptySlots() {
         // some code goes here
-        return 0;
+        int emptyNum = 0;
+        for(int i = 0;i < getNumTuples() ;i++){
+            if(!isSlotUsed(i)){
+                emptyNum++;
+            }
+        }
+        return emptyNum;
     }
 
     /**
@@ -296,7 +302,10 @@ public class HeapPage implements Page {
      */
     public boolean isSlotUsed(int i) {
         // some code goes here
-        return false;
+        int byteIdx = i / 8;
+        int posIdx =i % 8;
+        byte target = this.header[byteIdx];
+        return (byte) (target << (7 - posIdx)) < 0;
     }
 
     /**
@@ -305,6 +314,11 @@ public class HeapPage implements Page {
     private void markSlotUsed(int i, boolean value) {
         // some code goes here
         // not necessary for lab1
+        int byteIndex = i / 8;
+        int posIndex = i % 8;
+        byte v = (byte) (1 << posIndex);
+        byte headByte = this.header[byteIndex];
+        this.header[byteIndex] = value ? (byte) (headByte | v) : (byte) (headByte & ~v);
     }
 
     /**
@@ -313,7 +327,7 @@ public class HeapPage implements Page {
      */
     public Iterator<Tuple> iterator() {
         // some code goes here
-        return null;
+        return new IteratorWrapper<>(this.tuples);
     }
 
 }

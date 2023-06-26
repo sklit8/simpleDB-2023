@@ -1,9 +1,7 @@
 package simpledb.util;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @Description
@@ -132,6 +130,13 @@ public class LruCache<K,V> {
         }
         return list.iterator();
     }
+
+    public synchronized Iterator<V> valueIterator() {
+        final Collection<Node> nodes = this.nodeMap.values();
+        final List<V> valueList = nodes.stream().map(x -> x.value).collect(Collectors.toList());
+        return valueList.iterator();
+    }
+
     public synchronized int getSize(){
         return this.nodeMap.size();
     }

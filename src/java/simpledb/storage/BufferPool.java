@@ -9,8 +9,11 @@ import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 import simpledb.util.LruCache;
 
+import javax.xml.crypto.Data;
 import java.io.*;
 
+import java.util.Iterator;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -148,6 +151,16 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid, boolean commit) {
         // some code goes here
         // not necessary for lab1|lab2
+        try {
+            if(commit){
+                flushPages(tid);
+            }else{
+                reLoadPages(tid);
+            }
+            this.lockManager.releaseLockByTxn(tid);
+        } catch (IOException | DbException e) {
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -161,6 +174,9 @@ public class BufferPool {
      * been dirtied to the cache (replacing any existing versions of those pages) so 
      * that future requests see up-to-date pages. 
      *
+     * 代表事务 tid 将元组添加到指定的表中。将在元组添加到的页面上获取写锁定以及更新的任何其他页面（lab2 不需要锁定获取）。
+     * 如果无法获取锁，则可能会阻止。通过调用其 markDirty 位，将任何作弄脏的页面标记为脏页，
+     * 并将已脏的任何页的版本添加到缓存中（替换这些页的任何现有版本），以便将来的请求看到最新的页。
      * @param tid the transaction adding the tuple
      * @param tableId the table to add the tuple to
      * @param t the tuple to add
@@ -169,6 +185,12 @@ public class BufferPool {
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
         // not necessary for lab1
+        final DbFile table = Database.getCatalog().getDatabaseFile(tableId);
+        final List<Page> dityPages = table.insertTuple(tid,t);
+        for(final Page page : dityPages){
+            page.markDirty(true,tid);
+            this.lruCache.put(page.getId(), page);
+        }
     }
 
     /**
@@ -181,6 +203,10 @@ public class BufferPool {
      * been dirtied to the cache (replacing any existing versions of those pages) so 
      * that future requests see up-to-date pages. 
      *
+     * 从缓冲池中删除指定的元组。将在从中删除元组的页面上获取写锁定以及更新的任何其他页面。如果无法获取锁，则可能会阻止。
+     * 通过调用其 markDirty 位，将任何作弄脏的页面标记为脏页，并将已脏的任何页的版本添加到缓存中（替换这些页的任何现有版本），
+     * 以便将来的请求看到最新的页
+     *
      * @param tid the transaction deleting the tuple.
      * @param t the tuple to delete
      */
@@ -188,6 +214,13 @@ public class BufferPool {
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
         // not necessary for lab1
+        int tableId = t.getRecordId().getPageId().getTableId();
+        DbFile table = Database.getCatalog().getDatabaseFile(tableId);
+        final List<Page> dirtPages= table.deleteTuple(tid,t);
+        for(final Page page : dirtPages){
+            page.markDirty(true,tid);
+            this.lruCache.put(page.getId(), page);
+        }
     }
 
     /**
@@ -198,29 +231,42 @@ public class BufferPool {
     public synchronized void flushAllPages() throws IOException {
         // some code goes here
         // not necessary for lab1
-
+        final Iterator<Page> pageIterator = this.lruCache.valueIterator();
+        while(pageIterator.hasNext()){
+            flushPage(pageIterator.next());
+        }
     }
 
     /** Remove the specific page id from the buffer pool.
         Needed by the recovery manager to ensure that the
         buffer pool doesn't keep a rolled back page in its
         cache.
-        
         Also used by B+ tree files to ensure that deleted pages
         are removed from the cache so they can be reused safely
+        从缓冲池中删除特定的页面 ID。恢复管理器需要它来确保缓冲池不会在其缓存中保留回滚的页面。
+        也由 B+ 树文件用于确保从缓存中删除已删除的页面，以便可以安全地重复使用它们
     */
     public synchronized void discardPage(PageId pid) {
         // some code goes here
         // not necessary for lab1
+        this.lruCache.remove(pid);
     }
 
     /**
      * Flushes a certain page to disk
-     * @param pid an ID indicating the page to flush
+     * @param page the page that needed to be flush
      */
-    private synchronized  void flushPage(PageId pid) throws IOException {
+    public synchronized  void flushPage(Page page) throws IOException {
         // some code goes here
         // not necessary for lab1
+        try{
+            final DbFile tableFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
+            tableFile.writePage(page);
+            page.markDirty(false,null);
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("Error happen when flush page to disk:" + e.getMessage());
+        }
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -228,8 +274,24 @@ public class BufferPool {
     public synchronized  void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+
     }
 
+    /**
+     * @Description: 从磁盘重新加载指定事务的所有页面。
+     * @Author: luokunsong
+     * @Date: 2023/6/26
+     */
+    public synchronized void reLoadPages(TransactionId tid) throws DbException {
+        final Iterator<Page> pageIterator = this.lruCache.valueIterator();
+        while(pageIterator.hasNext()){
+            final  Page page = pageIterator.next();
+            if(page.isDirty() == tid){
+                discardPage(page.getId());
+                loadPageAndCache(page.getId());
+            }
+        }
+    }
     /**
      * Discards a page from the buffer pool.
      * Flushes the page to disk to ensure dirty pages are updated on disk.
