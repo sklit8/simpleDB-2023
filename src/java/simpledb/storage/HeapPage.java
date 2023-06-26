@@ -2,9 +2,8 @@ package simpledb.storage;
 
 import simpledb.common.Database;
 import simpledb.common.DbException;
-import simpledb.common.Debug;
 import simpledb.common.Catalog;
-import simpledb.transaction.IteratorWrapper;
+import simpledb.util.IteratorWrapper;
 import simpledb.transaction.TransactionId;
 
 import java.util.*;
