@@ -186,8 +186,8 @@ public class BufferPool {
         // some code goes here
         // not necessary for lab1
         final DbFile table = Database.getCatalog().getDatabaseFile(tableId);
-        final List<Page> dityPages = table.insertTuple(tid,t);
-        for(final Page page : dityPages){
+        final List<Page> dirtyPages = table.insertTuple(tid,t);
+        for(final Page page : dirtyPages){
             page.markDirty(true,tid);
             this.lruCache.put(page.getId(), page);
         }

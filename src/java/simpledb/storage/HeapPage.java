@@ -27,6 +27,7 @@ public class HeapPage implements Page {
 
     byte[] oldData;
     private final Byte oldDataLock= (byte) 0;
+    private TransactionId tid;
 
     /**
      * Create a HeapPage from a set of bytes of data read from disk.
@@ -250,6 +251,18 @@ public class HeapPage implements Page {
     public void deleteTuple(Tuple t) throws DbException {
         // some code goes here
         // not necessary for lab1
+        //找到对应的slot，标记为未使用，并将tuples数组对应slot的tuple值为空
+        final RecordId recordId = t.getRecordId();
+        final HeapPageId pageId = (HeapPageId) recordId.getPageId();
+        final int tn = recordId.getTupleNumber();
+        if(!pageId.equals(this.pid)){
+            throw new DbException("page is not match");
+        }
+        if(!isSlotUsed(tn)){
+            throw new DbException("Slot is not used");
+        }
+        markSlotUsed(tn,false);
+        this.tuples[tn] = null;
     }
 
     /**
@@ -262,6 +275,19 @@ public class HeapPage implements Page {
     public void insertTuple(Tuple t) throws DbException {
         // some code goes here
         // not necessary for lab1
+        //找到一个空的slot,插入并标记slot已使用
+        if (!t.getTupleDesc().equals(this.td)) {
+            throw new DbException("Tuple desc is not match");
+        }
+        for(int i = 0;i < getNumTuples();i ++){
+            if (!isSlotUsed(i)){
+                markSlotUsed(i,true);
+                t.setRecordId(new RecordId(this.pid,i));
+                this.tuples[i] = t;
+                return;
+            }
+        }
+        throw new DbException("the page is full");
     }
 
     /**
@@ -270,7 +296,8 @@ public class HeapPage implements Page {
      */
     public void markDirty(boolean dirty, TransactionId tid) {
         // some code goes here
-	// not necessary for lab1
+	    // not necessary for lab1
+        this.tid = dirty ? tid : null;
     }
 
     /**
@@ -279,7 +306,7 @@ public class HeapPage implements Page {
     public TransactionId isDirty() {
         // some code goes here
 	// Not necessary for lab1
-        return null;      
+        return this.tid;
     }
 
     /**
