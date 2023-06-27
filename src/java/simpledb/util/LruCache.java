@@ -121,10 +121,10 @@ public class LruCache<K,V> {
         }
     }
 
-    public synchronized Iterator<V> reverseIterator(){
+    public synchronized Iterator<V> reverseIterator() {
         Node last = this.tail.pre;
         final ArrayList<V> list = new ArrayList<>();
-        while(!list.equals(this.head)){
+        while (!last.equals(this.head)) {
             list.add(last.value);
             last = last.pre;
         }

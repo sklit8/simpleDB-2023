@@ -299,6 +299,15 @@ public class BufferPool {
     private synchronized  void evictPage() throws DbException {
         // some code goes here
         // not necessary for lab1
+        final Iterator<Page> pageIterator = this.lruCache.reverseIterator();
+        while (pageIterator.hasNext()){
+            final Page page = pageIterator.next();
+            if(page.isDirty() == null){
+                discardPage(page.getId());
+                return;
+            }
+        }
+        throw new DbException("All pages are dirty in buffer pool");
     }
 
 }
