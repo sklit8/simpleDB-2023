@@ -150,11 +150,12 @@ public class BufferPool {
      */
     public void transactionComplete(TransactionId tid, boolean commit) {
         // some code goes here
-        // not necessary for lab1|lab2
         try {
             if(commit){
+                //如果提交，则把所有页刷盘
                 flushPages(tid);
             }else{
+                //如果失败，重新加载所有页
                 reLoadPages(tid);
             }
             this.lockManager.releaseLockByTxn(tid);
