@@ -32,6 +32,7 @@ public class LockManager {
         }
     }
 
+    //获取锁，lockType == 0代表读锁，1代表写锁
     public synchronized boolean acquireLock(final PageId pageId,final TransactionId tid,final int lockType){
         //1.如果page没被锁，锁住返回true
         if(!this.lockMap.containsKey(pageId)){
@@ -41,9 +42,8 @@ public class LockManager {
             this.lockMap.put(pageId,locks);
             return true;
         }
-        //被锁了，拿出锁
+        //检查这个事务是否持有锁
         final List<Lock> locks = this.lockMap.get(pageId);
-        //2.检查是否当前事务的锁
         for(final Lock lock:locks){
             if(lock.getTid().equals(tid)){
                 if(lock.getLockType() == lockType){
@@ -73,6 +73,7 @@ public class LockManager {
         return false;
     }
 
+    //释放锁
     public synchronized boolean releaseLock(final PageId pageId,final TransactionId tid){
         if(!this.lockMap.containsKey(pageId)){
             return false;
