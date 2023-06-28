@@ -14,6 +14,7 @@ import javax.swing.tree.*;
  * The JoinOptimizer class is responsible for ordering a series of joins
  * optimally, and for selecting the best instantiation of a join for a given
  * logical plan.
+ * 类负责以最佳方式对一系列联接进行排序，并为给定的逻辑计划选择联接的最佳实例化。
  */
 public class JoinOptimizer {
     final LogicalPlan p;
@@ -128,9 +129,10 @@ public class JoinOptimizer {
         } else {
             // Insert your code here.
             // HINT: You may need to use the variable "j" if you implemented
-            // a join algorithm that's more complicated than a basic
-            // nested-loops join.
-            return -1.0;
+            // a join algorithm that's more complicated than a basic nested-loops join.
+            final double IoCost = cost1 + card1 * cost2;
+            final double CpuCost = card1 * card2;
+            return IoCost + CpuCost;
         }
     }
 
@@ -174,8 +176,43 @@ public class JoinOptimizer {
                                                    String field2PureName, int card1, int card2, boolean t1pkey,
                                                    boolean t2pkey, Map<String, TableStats> stats,
                                                    Map<String, Integer> tableAliasToId) {
+        /**
+         * * For equality joins, when one of the attributes is a primary key, the number of tuples produced by the join cannot
+         *   be larger than the cardinality of the non-primary key attribute.
+         *
+         * * For equality joins when there is no primary key, it's hard to say much about what the size of the output
+         *   is -- it could be the size of the product of the cardinalities of the tables (if both tables have the
+         *   same value for all tuples) -- or it could be 0.  It's fine to make up a simple heuristic (say,
+         *   the size of the larger of the two tables).
+         *
+         * * For range scans, it is similarly hard to say anything accurate about sizes.
+         *   The size of the output should be proportional to
+         *   the sizes of the inputs.  It is fine to assume that a fixed fraction
+         *   of the cross-product is emitted by range scans (say, 30%).  In general, the cost of a range
+         *   join should be larger than the cost of a non-primary key equality join of two tables
+         *   of the same size.
+         */
         int card = 1;
         // some code goes here
+        if(t1pkey && t2pkey){
+            card = Math.min(card1,card2);
+        }else if (!t1pkey && !t2pkey){
+            card = Math.max(card1,card2);
+        }else{
+            card = t1pkey ? card2 : card1;
+        }
+        switch (joinOp){
+            case EQUALS:{
+                break;
+            }
+            case NOT_EQUALS:{
+                card = card1 * card2 - card;
+                break;
+            }
+            default:{
+                card = card1 * card2 - card;
+            }
+        }
         return card <= 0 ? 1 : card;
     }
 
@@ -192,8 +229,6 @@ public class JoinOptimizer {
     public <T> Set<Set<T>> enumerateSubsets(List<T> v, int size) {
         Set<Set<T>> els = new HashSet<>();
         els.add(new HashSet<>());
-        // Iterator<Set> it;
-        // long start = System.currentTimeMillis();
 
         for (int i = 0; i < size; i++) {
             Set<Set<T>> newels = new HashSet<>();
@@ -231,14 +266,37 @@ public class JoinOptimizer {
      *             when stats or filter selectivities is missing a table in the
      *             join, or or when another internal error occurs
      */
-    public List<LogicalJoinNode> orderJoins(
-            Map<String, TableStats> stats,
-            Map<String, Double> filterSelectivities, boolean explain)
-            throws ParsingException {
-
+    //基于动态规划
+    public List<LogicalJoinNode> orderJoins(Map<String, TableStats> stats, Map<String, Double> filterSelectivities, boolean explain) throws ParsingException {
         // some code goes here
-        //Replace the following
-        return joins;
+        final PlanCache pc = new PlanCache();
+        CostCard costCard = null;
+        for(int i = 0; i<= this.joins.size();i++){
+            //生成size=i的子集，可以利用回溯算法来做
+            final Set<Set<LogicalJoinNode>> subsets = enumerateSubsets(this.joins,i);
+            for(final Set<LogicalJoinNode> subPlan : subsets){
+                double bestCost = Double.MAX_VALUE;
+                for(final LogicalJoinNode removeNode : subPlan){
+                    //尝试将这个子集中的一个node 从该子集中去除，然后子集中剩下的joinNode进行join，估算代价
+                    //比如node1 join node2 join node3，我们去除了node1，
+                    //然后估算（node2 Join node3）join node1 和node1 join（node2 node3），这两种哪个代价比较小，而node2 join node3 已经计算好了
+                    final CostCard cc = computeCostAndCardOfSubplan(stats,filterSelectivities,removeNode,subPlan,bestCost,pc);
+                    if(cc != null){
+                        bestCost = cc.cost;
+                        costCard = cc;
+                    }
+                }
+                //保存该子集中的最优执行计划
+                if(bestCost != Double.MAX_VALUE){
+                    pc.addPlan(subPlan,bestCost,costCard.card,costCard.plan);
+                }
+            }
+        }
+        if(costCard != null){
+            return costCard.plan;
+        }else {
+            return joins;
+        }
     }
 
     // ===================== Private Methods =================================
@@ -289,10 +347,8 @@ public class JoinOptimizer {
         if (this.p.getTableId(j.t2Alias) == null)
             throw new ParsingException("Unknown table " + j.t2Alias);
 
-        String table1Name = Database.getCatalog().getTableName(
-                this.p.getTableId(j.t1Alias));
-        String table2Name = Database.getCatalog().getTableName(
-                this.p.getTableId(j.t2Alias));
+        String table1Name = Database.getCatalog().getTableName(this.p.getTableId(j.t1Alias));
+        String table2Name = Database.getCatalog().getTableName(this.p.getTableId(j.t2Alias));
         String table1Alias = j.t1Alias;
         String table2Alias = j.t2Alias;
 
@@ -306,21 +362,15 @@ public class JoinOptimizer {
         if (news.isEmpty()) { // base case -- both are base relations
             prevBest = new ArrayList<>();
             t1cost = stats.get(table1Name).estimateScanCost();
-            t1card = stats.get(table1Name).estimateTableCardinality(
-                    filterSelectivities.get(j.t1Alias));
+            t1card = stats.get(table1Name).estimateTableCardinality(filterSelectivities.get(j.t1Alias));
             leftPkey = isPkey(j.t1Alias, j.f1PureName);
 
-            t2cost = table2Alias == null ? 0 : stats.get(table2Name)
-                    .estimateScanCost();
-            t2card = table2Alias == null ? 0 : stats.get(table2Name)
-                    .estimateTableCardinality(
-                            filterSelectivities.get(j.t2Alias));
-            rightPkey = table2Alias != null && isPkey(table2Alias,
-                    j.f2PureName);
+            t2cost = table2Alias == null ? 0 : stats.get(table2Name).estimateScanCost();
+            t2card = table2Alias == null ? 0 : stats.get(table2Name).estimateTableCardinality(filterSelectivities.get(j.t2Alias));
+            rightPkey = table2Alias != null && isPkey(table2Alias, j.f2PureName);
         } else {
             // news is not empty -- figure best way to join j to news
             prevBest = pc.getOrder(news);
-
             // possible that we have not cached an answer, if subset
             // includes a cross product
             if (prevBest == null) {
@@ -338,13 +388,9 @@ public class JoinOptimizer {
                 t1card = bestCard;
                 leftPkey = hasPkey(prevBest);
 
-                t2cost = j.t2Alias == null ? 0 : stats.get(table2Name)
-                        .estimateScanCost();
-                t2card = j.t2Alias == null ? 0 : stats.get(table2Name)
-                        .estimateTableCardinality(
-                                filterSelectivities.get(j.t2Alias));
-                rightPkey = j.t2Alias != null && isPkey(j.t2Alias,
-                        j.f2PureName);
+                t2cost = j.t2Alias == null ? 0 : stats.get(table2Name).estimateScanCost();
+                t2card = j.t2Alias == null ? 0 : stats.get(table2Name).estimateTableCardinality(filterSelectivities.get(j.t2Alias));
+                rightPkey = j.t2Alias != null && isPkey(j.t2Alias, j.f2PureName);
             } else if (doesJoin(prevBest, j.t2Alias)) { // j.t2 is in prevbest
                                                         // (both
                 // shouldn't be)
@@ -354,8 +400,7 @@ public class JoinOptimizer {
                 t2card = bestCard;
                 rightPkey = hasPkey(prevBest);
                 t1cost = stats.get(table1Name).estimateScanCost();
-                t1card = stats.get(table1Name).estimateTableCardinality(
-                        filterSelectivities.get(j.t1Alias));
+                t1card = stats.get(table1Name).estimateTableCardinality(filterSelectivities.get(j.t1Alias));
                 leftPkey = isPkey(j.t1Alias, j.f1PureName);
 
             } else {
@@ -383,8 +428,7 @@ public class JoinOptimizer {
 
         CostCard cc = new CostCard();
 
-        cc.card = estimateJoinCardinality(j, t1card, t2card, leftPkey,
-                rightPkey, stats);
+        cc.card = estimateJoinCardinality(j, t1card, t2card, leftPkey, rightPkey, stats);
         cc.cost = cost1;
         cc.plan = new ArrayList<>(prevBest);
         cc.plan.add(j); // prevbest is left -- add new join to end
