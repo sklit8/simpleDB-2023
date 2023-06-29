@@ -665,6 +665,19 @@ public class BTreeFile implements DbFile {
         // Move some of the tuples from the sibling to the page so
 		// that the tuples are evenly distributed. Be sure to update
 		// the corresponding parent entry.
+		int curTuples = page.getNumTuples();
+		int siblingTuples = sibling.getNumTuples();
+		int targetTuples = curTuples + siblingTuples >> 1;
+		Iterator<Tuple> iterator = isRightSibling ? sibling.iterator() : sibling.reverseIterator();
+		while (iterator.hasNext() && curTuples < targetTuples){
+			Tuple next = iterator.next();
+			sibling.deleteTuple(next);
+			page.insertTuple(next);
+			curTuples ++;
+		}
+		Tuple mid = sibling.iterator().next();
+		entry.setKey(mid.getField(parent.keyField));
+		parent.updateEntry(entry);
 	}
 
 	/**
@@ -744,6 +757,32 @@ public class BTreeFile implements DbFile {
 		// that the entries are evenly distributed. Be sure to update
 		// the corresponding parent entry. Be sure to update the parent
 		// pointers of all children in the entries that were moved.
+		int moved = leftSibling.getNumEntries() + page.getNumEntries() >> 1;
+		final Iterator<BTreeEntry> iterator = leftSibling.reverseIterator();
+
+		//1.将父节点移动到当前页
+		final BTreeEntry right = iterator.next();
+		leftSibling.deleteKeyAndRightChild(right);
+		final BTreeEntry left = page.iterator().next();
+		final BTreeEntry entry = new BTreeEntry(parentEntry.getKey(),right.getRightChild(),left.getLeftChild());
+		page.insertEntry(entry);
+		page.insertEntry(right);
+
+		//2.移动兄弟节点至当前节点
+		int curTuples = page.getNumEntries();
+		while ( curTuples < moved && iterator.hasNext()){
+			final BTreeEntry next = iterator.next();
+			leftSibling.deleteKeyAndRightChild(next);
+			page.insertEntry(next);
+			curTuples++;
+		}
+
+		//3.更新父节点
+		final BTreeEntry mid = iterator.next();
+		leftSibling.deleteKeyAndRightChild(mid);
+		parentEntry.setKey(mid.getKey());
+		parent.updateEntry(parentEntry);
+		updateParentPointers(tid,dirtypages,page);
 	}
 	
 	/**
