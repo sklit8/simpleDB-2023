@@ -259,7 +259,52 @@ public class BTreeFile implements DbFile {
 		// the new entry.  getParentWithEmtpySlots() will be useful here.  Don't forget to update
 		// the sibling pointers of all the affected leaf pages.  Return the page into which a 
 		// tuple with the given key field should be inserted.
-        return null;
+
+		//1.创建一个新页面,将满页面的元组复制到新页面，边复制边删除；
+		final BTreeLeafPage newPage = (BTreeLeafPage) getEmptyPage(tid,dirtypages,BTreePageId.LEAF);
+		int moved = page.getNumTuples() / 2;
+		final Iterator<Tuple> iterator = page.reverseIterator();
+		final List<Tuple> movedTuples = new ArrayList<>();
+		Tuple next = null;
+		while (iterator.hasNext() && moved > 0){
+			moved--;
+			next = iterator.next();
+			page.deleteTuple(next);
+			movedTuples.add(next);
+		}
+		assert next != null : "The mid leaf entry shoud not be null";
+		for(int i = movedTuples.size() - 1;i >= 0;i--){
+			newPage.insertTuple(movedTuples.get(i));
+		}
+
+		//2.更新兄弟页面的指针
+		if(page.getRightSiblingId() != null){
+			final BTreePageId rightId = page.getRightSiblingId();
+			final BTreeLeafPage rightPage = (BTreeLeafPage) getPage(tid,dirtypages,rightId,Permissions.READ_ONLY);
+			rightPage.setLeftSiblingId(newPage.getId());
+			newPage.setRightSiblingId(rightPage.getId());
+			dirtypages.put(rightPage.getId(),rightPage);
+		}
+
+		//3.更新指针
+		newPage.setLeftSiblingId(page.getId());
+		page.setRightSiblingId(newPage.getId());
+		dirtypages.put(page.getId(),page);
+		dirtypages.put(newPage.getId(),newPage);
+
+		//4.更新父节点
+		final BTreeInternalPage parentPage = getParentWithEmptySlots(tid,dirtypages,page.getParentId(),field);
+		final BTreeEntry entry = new BTreeEntry(next.getField(parentPage.keyField),page.getId(),newPage.getId());
+		parentPage.insertEntry(entry);
+		dirtypages.put(parentPage.getId(),parentPage);
+
+		//5.更新父节点指针
+		updateParentPointer(tid,dirtypages,parentPage.getId(),page.getId());
+		updateParentPointer(tid,dirtypages,parentPage.getId(),newPage.getId());
+
+		//6.根据field找出要插入的页面并返回；
+		final boolean isRight = field.compare(Op.GREATER_THAN_OR_EQ,next.getField(parentPage.keyField));
+        return isRight ? newPage : page;
 		
 	}
 	
@@ -296,7 +341,39 @@ public class BTreeFile implements DbFile {
 		// the parent pointers of all the children moving to the new page.  updateParentPointers()
 		// will be useful here.  Return the page into which an entry with the given key field
 		// should be inserted.
-		return null;
+		//1.新建一个internal page，作为新的页面；将满页面的entry复制到新页面，边复制边删除；
+		final BTreeInternalPage newPage = (BTreeInternalPage) getEmptyPage(tid,dirtypages,BTreePageId.INTERNAL);
+		int moved = page.getNumEntries() / 2;
+		final Iterator<BTreeEntry> iterator = page.reverseIterator();
+		final List<BTreeEntry> movedEntries = new ArrayList<>();
+		BTreeEntry next = null;
+		while (iterator.hasNext() && moved > 0){
+			moved--;
+			next = iterator.next();
+			page.deleteKeyAndRightChild(next);
+			movedEntries.add(next);
+		}
+		for(int i = movedEntries.size() - 1;i>= 0 ;i--){
+			newPage.insertEntry(movedEntries.get(i));
+		}
+		//2.将中间节点挤出去;这里与leaf page不同，也即子节点不用保留中间节点.
+		final BTreeEntry mid = iterator.next();
+		page.deleteKeyAndRightChild(mid);
+		mid.setLeftChild(page.getId());
+		mid.setRightChild(newPage.getId());
+		//3.更新脏页；
+		updateParentPointers(tid,dirtypages,page);
+		updateParentPointers(tid,dirtypages,newPage);
+		dirtypages.put(page.getId(),page);
+		dirtypages.put(newPage.getId(),newPage);
+		//7.根据中间节点获取父节点，将midEntry插入到父节点中，并更新脏页和指针；
+		final BTreeInternalPage parentPage = getParentWithEmptySlots(tid,dirtypages,page.getParentId(),field);
+		parentPage.insertEntry(mid);
+		dirtypages.put(parentPage.getId(),parentPage);
+
+		//8.根据field找出要插入的页面并返回；
+		final boolean isRight = field.compare(Op.GREATER_THAN_OR_EQ,mid.getKey());
+		return isRight ? newPage : page;
 	}
 	
 	/**
@@ -1212,14 +1289,11 @@ class BTreeSearchIterator extends AbstractDbFileIterator {
 					return t;
 				}
 				else if(ipred.getOp() == Op.LESS_THAN || ipred.getOp() == Op.LESS_THAN_OR_EQ) {
-					// if the predicate was not satisfied and the operation is less than, we have
-					// hit the end
+					// if the predicate was not satisfied and the operation is less than, we have hit the end
 					return null;
 				}
-				else if(ipred.getOp() == Op.EQUALS && 
-						t.getField(f.keyField()).compare(Op.GREATER_THAN, ipred.getField())) {
-					// if the tuple is now greater than the field passed in and the operation
-					// is equals, we have reached the end
+				else if(ipred.getOp() == Op.EQUALS && t.getField(f.keyField()).compare(Op.GREATER_THAN, ipred.getField())) {
+					// if the tuple is now greater than the field passed in and the operation is equals, we have reached the end
 					return null;
 				}
 			}
@@ -1230,8 +1304,7 @@ class BTreeSearchIterator extends AbstractDbFileIterator {
 				return null;
 			}
 			else {
-				curp = (BTreeLeafPage) Database.getBufferPool().getPage(tid,
-						nextp, Permissions.READ_ONLY);
+				curp = (BTreeLeafPage) Database.getBufferPool().getPage(tid, nextp, Permissions.READ_ONLY);
 				it = curp.iterator();
 			}
 		}
