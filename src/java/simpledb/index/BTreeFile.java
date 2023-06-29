@@ -184,11 +184,32 @@ public class BTreeFile implements DbFile {
 	 * @return the left-most leaf page possibly containing the key field f
 	 * 
 	 */
-	private BTreeLeafPage findLeafPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreePageId pid, Permissions perm,
-                                       Field f)
+	private BTreeLeafPage findLeafPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreePageId pid, Permissions perm, Field f)
 					throws DbException, TransactionAbortedException {
 		// some code goes here
-        return null;
+		//1.获取数据页类型,判断该数据页是否为叶子节点，如果是则递归结束，将该页面返回；
+		final int pageType = pid.pgcateg();
+		if (pageType == BTreePageId.LEAF){
+			return (BTreeLeafPage) getPage(tid,dirtypages,pid,perm);
+		}
+		//2.如果不是则说明该页面是内部节点，将页面进行转换
+		final BTreeInternalPage internalPage = (BTreeInternalPage) getPage(tid,dirtypages,pid,Permissions.READ_ONLY);
+		//3.获取内部节点索引节点迭代器
+		final Iterator<BTreeEntry> iterator = internalPage.iterator();
+		//4.对内部节点的entry进行迭代，这里主要是field是空的处理，如果是空直接找到最左的叶子页面即可
+		BTreeEntry entry = null;
+		while(iterator.hasNext()){
+			entry = iterator.next();
+			if(f == null){
+				return findLeafPage(tid,dirtypages,entry.getLeftChild(),perm,f);
+			}
+			//5.找到第一个》=field的entry进行迭代，然后递归其左孩子
+			if(entry.getKey().compare(Op.GREATER_THAN_OR_EQ,f)){
+				return findLeafPage(tid,dirtypages,entry.getLeftChild(),perm,f);
+			}
+		}
+		//6.如果到了最后一个页面，则递归其右孩子；
+        return entry == null ? null : findLeafPage(tid, dirtypages, entry.getRightChild(), perm, f);
 	}
 	
 	/**
@@ -202,8 +223,7 @@ public class BTreeFile implements DbFile {
 	 * @return the left-most leaf page possibly containing the key field f
 	 * 
 	 */
-	BTreeLeafPage findLeafPage(TransactionId tid, BTreePageId pid,
-                               Field f)
+	BTreeLeafPage findLeafPage(TransactionId tid, BTreePageId pid, Field f)
 					throws DbException, TransactionAbortedException {
 		return findLeafPage(tid, new HashMap<>(), pid, Permissions.READ_ONLY, f);
 	}
@@ -265,8 +285,7 @@ public class BTreeFile implements DbFile {
 	 * @throws IOException
 	 * @throws TransactionAbortedException
 	 */
-	public BTreeInternalPage splitInternalPage(TransactionId tid, Map<PageId, Page> dirtypages,
-			BTreeInternalPage page, Field field) 
+	public BTreeInternalPage splitInternalPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreeInternalPage page, Field field)
 					throws DbException, IOException, TransactionAbortedException {
 		// some code goes here
         //
@@ -297,8 +316,8 @@ public class BTreeFile implements DbFile {
 	 * @throws IOException
 	 * @throws TransactionAbortedException
 	 */
-	private BTreeInternalPage getParentWithEmptySlots(TransactionId tid, Map<PageId, Page> dirtypages,
-			BTreePageId parentId, Field field) throws DbException, IOException, TransactionAbortedException {
+	private BTreeInternalPage getParentWithEmptySlots(TransactionId tid, Map<PageId, Page> dirtypages, BTreePageId parentId, Field field)
+			throws DbException, IOException, TransactionAbortedException {
 		
 		BTreeInternalPage parent = null;
 		
@@ -1165,11 +1184,9 @@ class BTreeSearchIterator extends AbstractDbFileIterator {
 	 * for the given predicate operation
 	 */
 	public void open() throws DbException, TransactionAbortedException {
-		BTreeRootPtrPage rootPtr = (BTreeRootPtrPage) Database.getBufferPool().getPage(
-				tid, BTreeRootPtrPage.getId(f.getId()), Permissions.READ_ONLY);
+		BTreeRootPtrPage rootPtr = (BTreeRootPtrPage) Database.getBufferPool().getPage(tid, BTreeRootPtrPage.getId(f.getId()), Permissions.READ_ONLY);
 		BTreePageId root = rootPtr.getRootId();
-		if(ipred.getOp() == Op.EQUALS || ipred.getOp() == Op.GREATER_THAN 
-				|| ipred.getOp() == Op.GREATER_THAN_OR_EQ) {
+		if(ipred.getOp() == Op.EQUALS || ipred.getOp() == Op.GREATER_THAN || ipred.getOp() == Op.GREATER_THAN_OR_EQ) {
 			curp = f.findLeafPage(tid, root, ipred.getField());
 		}
 		else {
