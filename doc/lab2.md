@@ -11,31 +11,6 @@ You do not need to implement transactions or locking in this lab.
 
 The remainder of this document gives some suggestions about how to start coding, describes a set of exercises to help you work through the lab, and discusses how to hand in your code. This lab requires you to write a fair amount of code, so we encourage you to **start early**!
 
-
-
-## 1. Getting started
-
-You should begin with the code you submitted for Lab 1 (if you did not submit code for Lab 1, or your solution didn't work properly, contact us to discuss options). Additionally, we are providing extra source and test files for this lab that are not in the original code distribution you received.
-
-### 1.1. Getting Lab 2
-
-You will need to add these new files to your release. The easiest way to do this is to navigate to your project directory (probably called simple-db-hw) and pull from the master GitHub repository:
-
-```
-$ cd simple-db-hw
-$ git pull upstream master
-```
-
-**IDE users** will have update their project dependency to include the new library jars. For an easy solution, run
-
-```
-ant eclipse
-```
-
-again, and reopen the project with either Eclipse or IntelliJ.
-
-If you have made other changes to your project setup and do not want to lose them, you can also add the dependencies manually. For eclipse, under the package explorer, right click the project name (probably `simple-db-hw`), and select **Properties**. Choose **Java Build Path** on the left-hand-side, and click on the **Libraries** tab on the right-hand-side. Push the **Add JARs...** button, select **zql.jar** and **jline-0.9.94.jar**, and push **OK**, followed by **OK**. Your code should now compile. For IntelliJ, go to **Project Structure** under **File**, and under **Modules**, select the `simpledb` project, and navigate to the **Dependencies** tab. On the bottom of the pane, click on the `+` icon to add the jars as compile-time dependencies.
-
 ### 1.2. Implementation hints
 
 As before, we **strongly encourage** you to read through this entire document to get a feel for the high-level design of SimpleDB before you write code.

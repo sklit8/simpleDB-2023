@@ -3,75 +3,61 @@
 **Assigned: Wednesday, Mar 17, 2021**
 **Due: Tuesday, Apr 6, 2021**
 
-In this lab, you will implement a query optimizer on top of SimpleDB. The main tasks include implementing a selectivity estimation framework and a cost-based optimizer. You have freedom as to exactly what you implement, but we recommend using something similar to the Selinger cost-based optimizer discussed in class (Lecture 9).
+## 1.1. Implementation hints
 
-The remainder of this document describes what is involved in adding optimizer support and provides a basic outline of how you do so.
+在这个实验室中，你将在SimpleDB之上实现一个查询优化器。主要任务包括实现一个选择性估计框架和一个基于成本的优化器。你可以自由决定具体实现什么，但我们建议使用类似于课堂上讨论的Selinger基于成本的优化器（第9讲）。
 
-As with the previous lab, we recommend that you start as early as possible.
+本文件的其余部分描述了添加优化器支持所涉及的内容，并提供了一个基本的概要，说明你如何这样做。
 
-## 1. Getting started
+与之前的实验室一样，我们建议你尽可能早地开始。
 
-You should begin with the code you submitted for Lab 2. (If you did not submit code for Lab 2, or your solution didn't work properly, contact us to discuss options.)
+我们建议沿着这份文件进行练习，以指导你的实施，但你可能会发现不同的顺序对你更有意义。和以前一样，我们将通过查看你的代码并验证你是否通过了蚂蚁目标测试和systemtest的测试来给你的作业评分。关于评分和你需要通过的测试的完整讨论见第3.4节。
 
-We have provided you with extra test cases as well as source code files for this lab that are not in the original code distribution you received. We again encourage you to develop your own test suite in addition to the ones we have provided.
+下面是你可能进行这个实验的一种方式的粗略轮廓。关于这些步骤的更多细节将在下面第2节给出。
 
-You will need to add these new files to your release. The easiest way to do this is to change to your project directory (probably called simple-db-hw) and pull from the master GitHub repository:
-
-```
-$ cd simple-db-hw
-$ git pull upstream master
-```
-
-### 1.1. Implementation hints
-
-We suggest exercises along this document to guide your implementation, but you may find that a different order makes more sense for you. As before, we will grade your assignment by looking at your code and verifying that you have passed the test for the ant targets `test` and `systemtest`. See Section 3.4 for a complete discussion of grading and the tests you will need to pass.
-
-Here's a rough outline of one way you might proceed with this lab. More details on these steps are given in Section 2 below.
-
-- Implement the methods in the `TableStats` class that allow it to estimate selectivities of filters and cost of scans, using histograms (skeleton provided for the `IntHistogram` class) or some other form of statistics of your devising.
-- Implement the methods in the `JoinOptimizer` class that allow it to estimate the cost and selectivities of joins.
-- Write the `orderJoins` method in `JoinOptimizer`. This method must produce an optimal ordering for a series of joins (likely using the Selinger algorithm), given statistics computed in the previous two steps.
+- 使用直方图（IntHistogram类提供的骨架）或你设计的其他形式的统计数据，实现TableStats类中的方法，使其能够估计过滤器的选择性和扫描的成本。
+- 实现JoinOptimizer类中的方法，使其能够估计连接的成本和选择性。
+- 编写JoinOptimizer中的orderJoins方法。这个方法必须为一系列的连接产生一个最佳的顺序（可能使用Selinger算法），给定前两个步骤中计算的统计数据。
 
 ## 2. Optimizer outline
 
-Recall that the main idea of a cost-based optimizer is to:
+回顾一下，基于成本的优化器的主要思想是：：
 
-- Use statistics about tables to estimate "costs" of different query plans. Typically, the cost of a plan is related to the cardinalities of (number of tuples produced by) intermediate joins and selections, as well as the selectivity of filter and join predicates.
-- Use these statistics to order joins and selections in an optimal way, and to select the best implementation for join algorithms from amongst several alternatives.
+- 使用关于表的统计数据来估计不同查询计划的 "成本"。通常，一个计划的成本与中间连接和选择的cardinalities（产生的图元数量）以及过滤器和连接谓词的选择性有关。
+- 利用这些统计数据，以最佳方式排列连接和选择，并从几个备选方案中选择连接算法的最佳实现。
+  在本实验中，你将实现代码来执行这两个功能。
 
-In this lab, you will implement code to perform both of these functions.
-
-The optimizer will be invoked from `simpledb/Parser.java`. You may wish to review the [lab 2 parser exercise](https://github.com/MIT-DB-Class/simple-db-hw-2021/blob/master/lab2.md#27-query-parser) before starting this lab. Briefly, if you have a catalog file `catalog.txt` describing your tables, you can run the parser by typing:
+优化器将从simpledb/Parser.java中调用。在开始本实验之前，你可能希望回顾一下实验2的解析器练习。简而言之，如果你有一个描述你的表的目录文件 catalog.txt，你可以通过输入来运行解析器：
 
 ```
 java -jar dist/simpledb.jar parser catalog.txt
 ```
 
-When the Parser is invoked, it will compute statistics over all of the tables (using statistics code you provide). When a query is issued, the parser will convert the query into a logical plan representation and then call your query optimizer to generate an optimal plan.
+当解析器被调用时，它将计算所有表的统计数据（使用你提供的统计代码）。当一个查询被发出时，解析器将把查询转换成逻辑计划表示，然后调用你的查询优化器来生成一个最佳计划。
 
 ### 2.1 Overall Optimizer Structure
 
-Before getting started with the implementation, you need to understand the overall structure of the SimpleDB optimizer. The overall control flow of the SimpleDB modules of the parser and optimizer is shown in Figure 1.
+在开始实施之前，你需要了解SimpleDB优化器的整体结构。分析器和优化器的SimpleDB模块的整体控制流程如图1所示。
 
 [![img](https://github.com/CreatorsStack/CreatorDB/raw/master/doc/controlflow.png)](https://github.com/CreatorsStack/CreatorDB/blob/master/doc/controlflow.png)
 *Figure 1: Diagram illustrating classes, methods, and objects used in the parser*
 
-The key at the bottom explains the symbols; you will implement the components with double-borders. The classes and methods will be explained in more detail in the text that follows (you may wish to refer back to this diagram), but the basic operation is as follows:
+底部的钥匙解释了这些符号；你将实现带有双边框的组件。这些类和方法将在后面的文字中得到更详细的解释（你可能希望回过头来看看这个图），但基本操作如下：
 
-1. `Parser.java` constructs a set of table statistics (stored in the `statsMap` container) when it is initialized. It then waits for a query to be input, and calls the method `parseQuery` on that query.
-2. `parseQuery` first constructs a `LogicalPlan` that represents the parsed query. `parseQuery` then calls the method `physicalPlan` on the `LogicalPlan` instance it has constructed. The `physicalPlan` method returns a `DBIterator` object that can be used to actually run the query.
+- Parser.java在初始化时构建了一组表的统计数据（存储在statsMap容器中）。然后它等待一个查询的输入，并对该查询调用parseQuery方法。
+- parseQuery首先构造一个代表解析查询的LogicalPlan，然后在它构造的LogicalPlan实例上调用physicalPlan方法。physicalPlan 方法返回一个 DBIterator 对象，该对象可用于实际运行查询。
 
-In the exercises to come, you will implement the methods that help `physicalPlan` devise an optimal plan.
+在接下来的练习中，你将实现帮助 physicalPlan 设计一个最佳计划的方法。
 
 ### 2.2. Statistics Estimation
 
-Accurately estimating plan cost is quite tricky. In this lab, we will focus only on the cost of sequences of joins and base table accesses. We won't worry about access method selection (since we only have one access method, table scans) or the costs of additional operators (like aggregates).
+准确地估计计划成本是相当棘手的。在这个实验室中，我们将只关注连接序列和基本表访问的成本。我们不会担心访问方法的选择（因为我们只有一种访问方法，即表扫描），也不会担心额外运算符（如聚合）的成本。
 
-You are only required to consider left-deep plans for this lab. See Section 2.3 for a description of additional "bonus" optimizer features you might implement, including an approach for handling bushy plans.
+在这个实验中，你只需要考虑左深层计划。参见第2.3节，了解你可能实现的额外的 "奖励 "优化器功能，包括处理杂乱计划的方法。
 
 #### 2.2.1 Overall Plan Cost
 
-We will write join plans of the form `p=t1 join t2 join ... tn`, which signifies a left deep join where t1 is the left-most join (deepest in the tree). Given a plan like `p`, its cost can be expressed as:
+我们将以p=t1 join t2 join ... tn的形式来写连接计划，这表示一个左深连接，其中t1是最左边的连接（树中最深的）。给定一个像p这样的计划，其成本可以表示为：
 
 ```
 scancost(t1) + scancost(t2) + joincost(t1 join t2) +
@@ -79,18 +65,18 @@ scancost(t3) + joincost((t1 join t2) join t3) +
 ... 
 ```
 
-Here, `scancost(t1)` is the I/O cost of scanning table t1, `joincost(t1,t2)` is the CPU cost to join t1 to t2. To make I/O and CPU cost comparable, typically a constant scaling factor is used, e.g.:
+这里，scancost(t1)是扫描表t1的I/O成本，joincost(t1,t2)是连接t1和t2的CPU成本。为了使I/O和CPU成本具有可比性，通常使用一个恒定的比例因子，例如：
 
 ```
 cost(predicate application) = 1
 cost(pageScan) = SCALING_FACTOR x cost(predicate application)
 ```
 
-For this lab, you can ignore the effects of caching (e.g., assume that every access to a table incurs the full cost of a scan) -- again, this is something you may add as an optional bonus extension to your lab in Section 2.3. Therefore, `scancost(t1)` is simply the number of pages in `t1 x SCALING_FACTOR`.
+在这个实验中，你可以忽略缓存的影响（例如，假设对表的每一次访问都会产生全部的扫描成本）--同样，这也是你可以在第2.3节中作为一个可选的额外扩展添加到实验中的东西。因此，scancost(t1)只是t1的页数x SCALING_FACTOR。
 
 #### 2.2.2 Join Cost
 
-When using nested loops joins, recall that the cost of a join between two tables t1 and t2 (where t1 is the outer) is simply:
+当使用嵌套循环连接时，记得两个表t1和t2（其中t1是外表）之间的连接成本是简单的：
 
 ```
 joincost(t1 join t2) = scancost(t1) + ntups(t1) x scancost(t2) //IO cost
@@ -101,77 +87,77 @@ Here, `ntups(t1)` is the number of tuples in table t1.
 
 #### 2.2.3 Filter Selectivity
 
-`ntups` can be directly computed for a base table by scanning that table. Estimating `ntups` for a table with one or more selection predicates over it can be trickier -- this is the *filter selectivity estimation* problem. Here's one approach that you might use, based on computing a histogram over the values in the table:
+`ntups`可以通过扫描一个基表直接计算出来。对于一个有一个或多个选择谓词的表来说，估计ntups可能比较棘手--这就是过滤器的选择性估计问题。下面是你可能使用的一种方法，基于计算表中的值的直方图：
 
-- Compute the minimum and maximum values for every attribute in the table (by scanning it once).
-- Construct a histogram for every attribute in the table. A simple approach is to use a fixed number of buckets *NumB*, with each bucket representing the number of records in a fixed range of the domain of the attribute of the histogram. For example, if a field *f* ranges from 1 to 100, and there are 10 buckets, then bucket 1 might contain the count of the number of records between 1 and 10, bucket 2 a count of the number of records between 11 and 20, and so on.
-- Scan the table again, selecting out all of fields of all of the tuples and using them to populate the counts of the buckets in each histogram.
-- To estimate the selectivity of an equality expression, *f=const*, compute the bucket that contains value *const*. Suppose the width (range of values) of the bucket is *w*, the height (number of tuples) is *h*, and the number of tuples in the table is *ntups*. Then, assuming values are uniformly distributed throughout the bucket, the selectivity of the expression is roughly *(h / w) / ntups*, since *(h/w)* represents the expected number of tuples in the bin with value *const*.
-- To estimate the selectivity of a range expression *f>const*, compute the bucket *b* that *const* is in, with width *w_b* and height *h_b*. Then, *b* contains a fraction *b_f = h_b / ntups* of the total tuples. Assuming tuples are uniformly distributed throughout *b*, the fraction *b_part* of *b* that is *> const* is *(b_right - const) / w_b*, where *b_right* is the right endpoint of *b*'s bucket. Thus, bucket *b* contributes *(b_f x b_part)* selectivity to the predicate. In addition, buckets *b+1...NumB-1* contribute all of their selectivity (which can be computed using a formula similar to *b_f* above). Summing the selectivity contributions of all the buckets will yield the overall selectivity of the expression. Figure 2 illustrates this process.
-- Selectivity of expressions involving *less than* can be performed similar to the greater than case, looking at buckets down to 0.
+- 计算表中每个属性的最小和最大值（通过扫描一次）。
+- 为表中的每个属性构建一个直方图。一个简单的方法是使用一个固定数量的桶NumB，每个桶代表直方图属性域的固定范围内的记录数。例如，如果一个字段f的范围是1到100，有10个桶，那么桶1可能包含1到10之间的记录数，桶2包含11到20之间的记录数，以此类推。
+- 再次扫描该表，选择出所有图元的所有字段，用它们来填充每个直方图中的桶的计数。
+- 为了估计平等表达式的选择性，f=const，计算包含值const的桶。假设桶的宽度（值的范围）是w，高度（图元的数量）是h，表中图元的数量是ntups。那么，假设值在整个桶中是均匀分布的，表达式的选择性大致为(h/w)/ntups，因为(h/w)代表了桶中值为常数的图元的预期数量。
+- 为了估计一个范围表达式f>const的选择性，计算const所在的桶b，其宽度为w_b，高度为h_b。那么，b包含全部图元的一部分b_f = h_b / ntups。假设图元均匀地分布在整个b中，b中大于const的部分b_part是（b_right - const）/ w_b，其中b_right是b的桶的右端点。因此，b桶对谓词贡献了（b_f x b_part）的选择性。此外，b+1...NumB-1桶贡献了它们所有的选择性（可以用类似于上面b_f的公式来计算）。将所有桶的选择性贡献相加，将产生表达式的整体选择性。图2说明了这个过程。
+- 涉及小于的表达式的选择性可以与大于的情况类似，看下到0的桶。
 
 [![img](https://github.com/CreatorsStack/CreatorDB/raw/master/doc/lab3-hist.png)](https://github.com/CreatorsStack/CreatorDB/blob/master/doc/lab3-hist.png)
 *Figure 2: Diagram illustrating the histograms you will implement in Lab 5*
 
-In the next two exercises, you will code to perform selectivity estimation of joins and filters.
+在接下来的两个练习中，你将用代码来执行连接和过滤器的选择性估计。
 
 ------
 
 **Exercise 1: IntHistogram.java**
 
-You will need to implement some way to record table statistics for selectivity estimation. We have provided a skeleton class, `IntHistogram` that will do this. Our intent is that you calculate histograms using the bucket-based method described above, but you are free to use some other method so long as it provides reasonable selectivity estimates.
+你将需要实现一些方法来记录表的统计数据，以便进行选择性估计。我们提供了一个骨架类，IntHistogram，它可以做到这一点。我们的目的是让你使用上面描述的基于桶的方法来计算直方图，但你也可以自由地使用其他方法，只要它能提供合理的选择性估计。
 
-We have provided a class `StringHistogram` that uses `IntHistogram` to compute selecitivites for String predicates. You may modify `StringHistogram` if you want to implement a better estimator, though you should not need to in order to complete this lab.
+我们提供了一个StringHistogram类，它使用IntHistogram来计算字符串谓词的选择度。如果你想实现一个更好的估计方法，你可以修改StringHistogram，尽管你不需要为了完成这个实验而修改。
 
-After completing this exercise, you should be able to pass the `IntHistogramTest` unit test (you are not required to pass this test if you choose not to implement histogram-based selectivity estimation).
+完成这个练习后，你应该能够通过IntHistogramTest单元测试（如果你选择不实现基于直方图的选择性估计，则不要求你通过这个测试）。
 
 ------
 
 **Exercise 2: TableStats.java**
 
-The class `TableStats` contains methods that compute the number of tuples and pages in a table and that estimate the selectivity of predicates over the fields of that table. The query parser we have created creates one instance of `TableStats` per table, and passes these structures into your query optimizer (which you will need in later exercises).
+TableStats类包含了计算一个表中图元和页数的方法，以及估计该表字段上的谓词的选择性的方法。我们创建的查询分析器为每个表创建一个TableStats的实例，并将这些结构传递给你的查询优化器（在后面的练习中你会需要它）。
 
-You should fill in the following methods and classes in `TableStats`:
+你应该在TableStats中填写以下方法和类：
 
-- Implement the `TableStats` constructor: Once you have implemented a method for tracking statistics such as histograms, you should implement the `TableStats` constructor, adding code to scan the table (possibly multiple times) to build the statistics you need.
-- Implement `estimateSelectivity(int field, Predicate.Op op, Field constant)`: Using your statistics (e.g., an `IntHistogram` or `StringHistogram` depending on the type of the field), estimate the selectivity of predicate `field op constant` on the table.
-- Implement `estimateScanCost()`: This method estimates the cost of sequentially scanning the file, given that the cost to read a page is `costPerPageIO`. You can assume that there are no seeks and that no pages are in the buffer pool. This method may use costs or sizes you computed in the constructor.
-- Implement `estimateTableCardinality(double selectivityFactor)`: This method returns the number of tuples in the relation, given that a predicate with selectivity selectivityFactor is applied. This method may use costs or sizes you computed in the constructor.
+- 实现TableStats构造函数：一旦你实现了跟踪统计的方法，如直方图，你应该实现TableStats构造函数，添加代码来扫描表（可能是多次）以建立你需要的统计。
+- 实现 estimateSelectivity(int field, Predicate.Op op、字段常数）：使用你的统计数据（例如，根据字段的类型，使用IntHistogram或StringHistogram），估计表上predicate字段op常数的选择率。
+- 实现 estimateScanCost()：这个方法估计了顺序扫描文件的成本，鉴于读取一个页面的成本costPerPageIO。你可以假设没有寻道，也没有页面在缓冲池中。这个方法可以使用你在构造函数中计算的成本或大小。
+- 实现 estimateTableCardinality(doubleselectivityFactor）：该方法返回关系中图元的数量，考虑到应用了具有选择性的selectivityFactor的谓词。这个方法可以使用你在构造函数中计算的成本或大小。
 
-You may wish to modify the constructor of `TableStats.java` to, for example, compute histograms over the fields as described above for purposes of selectivity estimation.
+你可能希望修改TableStats.java的构造函数，例如，为了选择性估计的目的，计算上述字段的直方图。
 
-After completing these tasks you should be able to pass the unit tests in `TableStatsTest`.
+完成这些任务后，你应该能够通过TableStatsTest中的单元测试。.
 
 ------
 
 #### 2.2.4 Join Cardinality
 
-Finally, observe that the cost for the join plan `p` above includes expressions of the form `joincost((t1 join t2) join t3)`. To evaluate this expression, you need some way to estimate the size (`ntups`) of `t1 join t2`. This *join cardinality estimation* problem is harder than the filter selectivity estimation problem. In this lab, you aren't required to do anything fancy for this, though one of the optional excercises in Section 2.4 includes a histogram-based method for join selectivity estimation.
+最后，观察一下，上面的连接计划p的成本包括joincost((t1 join t2) joint3).为了评估这个表达式，你需要一些方法来估计t1 join t2的大小（ntups）。这个连接cardinality估计问题比过滤器的选择性估计问题更难。在这个实验室中，你不需要为此做任何花哨的事情，尽管第2.4节中的一个可选的练习包括一个基于直方图的连接选择性估计的方法。
 
-While implementing your simple solution, you should keep in mind the following:
+在实现你的简单解决方案时，你应该牢记以下几点：
 
-- For equality joins, when one of the attributes is a primary key, the number of tuples produced by the join cannot be larger than the cardinality of the non-primary key attribute.
-- For equality joins when there is no primary key, it's hard to say much about what the size of the output is -- it could be the size of the product of the cardinalities of the tables (if both tables have the same value for all tuples) -- or it could be 0. It's fine to make up a simple heuristic (say, the size of the larger of the two tables).
-- For range scans, it is similarly hard to say anything accurate about sizes. The size of the output should be proportional to the sizes of the inputs. It is fine to assume that a fixed fraction of the cross-product is emitted by range scans (say, 30%). In general, the cost of a range join should be larger than the cost of a non-primary key equality join of two tables of the same size.
+- 对于等价连接，当其中一个属性是主键时，由连接产生的图元的数量不能大于非主键属性的cardinality。
+- 对于没有主键的等价连接，很难说输出的大小是什么--它可能是表的cardinality的乘积（如果两个表的所有图元都有相同的值）--或者它可能是0。
+- 对于范围扫描，同样也很难对大小有什么准确的说法。输出的大小应该与输入的大小成正比。假设交叉产品的一个固定部分是由范围扫描发出的（比如说，30%），是可以的。一般来说，范围连接的成本应该大于相同大小的两个表的非主键平等连接的成本。
 
 ------
 
 **Exercise 3: Join Cost Estimation**
 
-The class `JoinOptimizer.java` includes all of the methods for ordering and computing costs of joins. In this exercise, you will write the methods for estimating the selectivity and cost of a join, specifically:
+JoinOptimizer.java类包括所有用于排序和计算连接成本的方法。在这个练习中，你将写出用于估计连接的选择性和成本的方法，特别是：
 
-- Implement ` estimateJoinCost(LogicalJoinNode j, int card1, int card2, double cost1, double cost2)`: This method estimates the cost of join j, given that the left input is of cardinality card1, the right input of cardinality card2, that the cost to scan the left input is cost1, and that the cost to access the right input is card2. You can assume the join is an NL join, and apply the formula mentioned earlier.
-- Implement `estimateJoinCardinality(LogicalJoinNode j, int card1, int card2, boolean t1pkey, boolean t2pkey)`: This method estimates the number of tuples output by join j, given that the left input is size card1, the right input is size card2, and the flags t1pkey and t2pkey that indicate whether the left and right (respectively) field is unique (a primary key).
+- 实现estimateJoinCost(LogicalJoinNode j, int card1, int card2, doublecost1, double cost2）：这个方法估计了连接j的成本，考虑到左边的输入是cardinality card1，右边的输入是cardinality card2，扫描左边输入的成本是cost1，而访问右边输入的成本是card2。你可以假设这个连接是一个NL连接，并应用前面提到的公式。
+- 实现 estimateJoinCardinality(LogicalJoinNode j, intcard1, int card2, boolean t1pkey, boolean t2pkey）：这个方法估计了由连接j输出的图元的数量，给定左边的输入是大小为card1，右边的输入是大小为card2，以及指示左边和右边（分别）字段是否唯一（主键）的标志t1pkey和t2pkey。
 
-After implementing these methods, you should be able to pass the unit tests `estimateJoinCostTest` and `estimateJoinCardinality` in `JoinOptimizerTest.java`.
+实现这些方法后，你应该能够通过JoinOptimizerTest.java中的单元测试 estimateJoinCostTest 和 estimateJoinCardinality。
 
 ------
 
 ### 2.3 Join Ordering
 
-Now that you have implemented methods for estimating costs, you will implement the Selinger optimizer. For these methods, joins are expressed as a list of join nodes (e.g., predicates over two tables) as opposed to a list of relations to join as described in class.
+现在你已经实现了估计成本的方法，你将实现Selinger优化器。对于这些方法，连接被表达为一个连接节点的列表（例如，对两个表的谓词），而不是课堂上描述的连接关系的列表。
 
-Translating the algorithm given in lecture to the join node list form mentioned above, an outline in pseudocode would be:
+将讲座中给出的算法转换为上面提到的连接节点列表形式，伪代码的大纲是：
 
 ```
 1. j = set of join nodes
@@ -187,9 +173,9 @@ Translating the algorithm given in lecture to the join node list form mentioned 
 11. return optjoin(j)
 ```
 
-To help you implement this algorithm, we have provided several classes and methods to assist you. First, the method `enumerateSubsets(List v, int size)` in `JoinOptimizer.java` will return a set of all of the subsets of `v` of size `size`. This method is VERY inefficient for large sets; you can earn extra credit by implementing a more efficient enumerator (hint: consider using an in-place generation algorithm and a lazy iterator (or stream) interface to avoid materializing the entire power set).
+为了帮助你实现这个算法，我们提供了几个类和方法来帮助你。首先，JoinOptimizer.java中的enumerateSubsets(List v, int size)方法将返回一个大小为v的所有子集的集合。这个方法对于大型集合来说效率非常低；你可以通过实现一个更有效的枚举器来获得额外的分数（提示：考虑使用原地生成算法和懒惰迭代器（或流）接口来避免物化整个幂集）。
 
-Second, we have provided the method:
+第二，我们已经提供了方法：
 
 ```
     private CostCard computeCostAndCardOfSubplan(Map<String, TableStats> stats, 
@@ -200,9 +186,10 @@ Second, we have provided the method:
                                                 PlanCache pc) 
 ```
 
-Given a subset of joins (`joinSet`), and a join to remove from this set (`joinToRemove`), this method computes the best way to join `joinToRemove` to `joinSet - {joinToRemove}`. It returns this best method in a `CostCard` object, which includes the cost, cardinality, and best join ordering (as a list). `computeCostAndCardOfSubplan` may return null, if no plan can be found (because, for example, there is no left-deep join that is possible), or if the cost of all plans is greater than the `bestCostSoFar` argument. The method uses a cache of previous joins called `pc` (`optjoin` in the psuedocode above) to quickly lookup the fastest way to join `joinSet - {joinToRemove}`. The other arguments (`stats` and `filterSelectivities`) are passed into the `orderJoins` method that you must implement as a part of Exercise 4, and are explained below. This method essentially performs lines 6--8 of the psuedocode described earlier.
+给出一个连接的子集（joinSet），以及一个要从这个子集中移除的连接（joinToRemove），这个方法计算出将joinToRemove连接到joinSet的最佳方法--{joinToRemove}。它在一个CostCard对象中返回这个最佳方法，其中包括成本、cardinality和最佳连接顺序（作为一个列表）。如果找不到计划（因为，例如，没有可能的左深连接），或者如果所有计划的成本都大于bestCostSoFar参数，computeCostAndCardOfSubplan可能返回null。该方法使用了一个叫做pc的先前连接的缓存（在上面的psuedocode中是optjoin）来快速查找joinSet的最快方式--
+{joinToRemove}。其他参数（stats和filterSelectivities）被传递到你必须实现的orderJoins方法中，作为练习4的一部分，下面会有解释。这个方法基本上是执行前面描述的假代码的第6-8行。
 
-Third, we have provided the method:
+第三，我们提供了这个方法：
 
 ```
     private void printJoins(List<LogicalJoinNode> js, 
@@ -211,9 +198,9 @@ Third, we have provided the method:
                            Map<String, Double> selectivities)
 ```
 
-This method can be used to display a graphical representation of a join plan (when the "explain" flag is set via the "-explain" option to the optimizer, for example).
+这种方法可以用来显示连接计划的图形表示（例如，当通过优化器的"-explain "选项设置 "explain "标志时）。
 
-Fourth, we have provided a class `PlanCache` that can be used to cache the best way to join a subset of the joins considered so far in your implementation of Selinger (an instance of this class is needed to use `computeCostAndCardOfSubplan`).
+第四，我们提供了一个PlanCache类，可以用来缓存到目前为止在你实现Selinger时考虑的连接子集的最佳方式（使用computeCostAndCardOfSubplan需要这个类的一个实例）。
 
 ------
 
@@ -227,36 +214,8 @@ In `JoinOptimizer.java`, implement the method:
                    boolean explain)
 ```
 
-This method should operate on the `joins` class member, returning a new List that specifies the order in which joins should be done. Item 0 of this list indicates the left-most, bottom-most join in a left-deep plan. Adjacent joins in the returned list should share at least one field to ensure the plan is left-deep. Here `stats` is an object that lets you find the `TableStats` for a given table name that appears in the `FROM` list of the query. `filterSelectivities` allows you to find the selectivity of any predicates over a table; it is guaranteed to have one entry per table name in the `FROM` list. Finally, `explain` specifies that you should output a representation of the join order for informational purposes.
+这个方法应该在joins类成员上操作，返回一个新的List，这个List指定了应该进行的连接的顺序。这个列表中的第0项表示左深计划中最左、最底的连接。返回的列表中相邻的连接应该至少共享一个字段以确保计划是左深的。这里stats是一个对象，让你找到出现在查询的FROM列表中的给定表名的TableStats。 filterSelectivities让你找到表上任何谓词的选择性；它保证在FROM列表中的每个表名有一个条目。最后，explain指定了你应该输出一个连接顺序的表示，以供参考。
 
-You may wish to use the helper methods and classes described above to assist in your implementation. Roughly, your implementation should follow the psuedocode above, looping through subset sizes, subsets, and sub-plans of subsets, calling `computeCostAndCardOfSubplan` and building a `PlanCache` object that stores the minimal-cost way to perform each subset join.
+你可能希望使用上面描述的辅助方法和类来帮助你实现。大致上，你的实现应该遵循上面的假设代码，通过子集大小、子集和子集的子计划进行循环，调用 computeCostAndCardOfSubplan 并建立一个 PlanCache 对象来存储执行每个子集连接的最小成本方式。
 
-After implementing this method, you should be able to pass all the unit tests in `JoinOptimizerTest`. You should also pass the system test `QueryTest`.
-
-### 2.4 Extra Credit
-
-In this section, we describe several optional excercises that you may implement for extra credit. These are less well defined than the previous exercises but give you a chance to show off your mastery of query optimization! Please clearly mark which ones you have chosen to complete in your report, and briefly explain your implementation and present your results (benchmark numbers, experience reports, etc.)
-
-------
-
-**Bonus Exercises.** Each of these bonuses is worth up to 5% extra credit:
-
-- Add code to perform more advanced join cardinality estimation
-
-  . Rather than using simple heuristics to estimate join cardinality, devise a more sophisticated algorithm.
-
-  - One option is to use joint histograms between every pair of attributes *a* and *b* in every pair of tables *t1* and *t2*. The idea is to create buckets of *a*, and for each bucket *A* of *a*, create a histogram of *b* values that co-occur with *a* values in *A*.
-  - Another way to estimate the cardinality of a join is to assume that each value in the smaller table has a matching value in the larger table. Then the formula for the join selectivity would be: 1/(*Max*(*num-distinct*(t1, column1), *num-distinct*(t2, column2))). Here, column1 and column2 are the join attributes. The cardinality of the join is then the product of the cardinalities of *t1* and *t2* times the selectivity.
-
-- *Improved subset iterator*. Our implementation of `enumerateSubsets` is quite inefficient, because it creates a large number of Java objects on each invocation.
-  In this bonus exercise, you would improve the performance of `enumerateSubsets` so that your system could perform query optimization on plans with 20 or more joins (currently such plans takes minutes or hours to compute).
-
-- *A cost model that accounts for caching*. The methods to estimate scan and join cost do not account for caching in the buffer pool. You should extend the cost model to account for caching effects. This is tricky because multiple joins are running simultaneously due to the iterator model, and so it may be hard to predict how much memory each will have access to using the simple buffer pool we have implemented in previous labs.
-
-- *Improved join algorithms and algorithm selection*. Our current cost estimation and join operator selection algorithms (see `instantiateJoin()` in `JoinOptimizer.java`) only consider nested loops joins. Extend these methods to use one or more additional join algorithms (for example, some form of in memory hashing using a `HashMap`).
-
-- *Bushy plans*. Improve the provided `orderJoins()` and other helper methods to generate bushy joins. Our query plan generation and visualization algorithms are perfectly capable of handling bushy plans; for example, if `orderJoins()` returns the list (t1 join t2 ; t3 join t4 ; t2 join t3), this will correspond to a bushy plan with the (t2 join t3) node at the top.
-
-------
-
-You have now completed this lab. Good work!
+实现这个方法后，你应该能够通过JoinOptimizerTest中的所有单元测试。你也应该通过系统测试QueryTest。
