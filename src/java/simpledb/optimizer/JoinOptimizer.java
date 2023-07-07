@@ -226,25 +226,24 @@ public class JoinOptimizer {
      *            The size of the subsets of interest
      * @return a set of all subsets of the specified size
      */
-    public <T> Set<Set<T>> enumerateSubsets(List<T> v, int size) {
-        Set<Set<T>> els = new HashSet<>();
-        els.add(new HashSet<>());
-
-        for (int i = 0; i < size; i++) {
-            Set<Set<T>> newels = new HashSet<>();
-            for (Set<T> s : els) {
-                for (T t : v) {
-                    Set<T> news = new HashSet<>(s);
-                    if (news.add(t))
-                        newels.add(news);
-                }
-            }
-            els = newels;
+    private <T> void dfs(List<T> list, int cur, int size,Deque<T> subset, Set<Set<T>> subsets){
+        if(subset.size() == size){
+            subsets.add(new HashSet<>(subset));
+            //return;
         }
-
-        return els;
-
+        for(int i=cur; i<list.size(); i++){
+            subset.addLast(list.get(i));
+            dfs(list,i+1,size,subset,subsets);
+            subset.removeLast();
+        }
     }
+    public <T> Set<Set<T>> enumerateSubsets(List<T> v, int size) {
+        Set<Set<T>> subsets = new HashSet<>();
+        Deque<T> subset = new ArrayDeque<>();
+        dfs(v,0,size,subset,subsets);
+        return subsets;
+    }
+
 
     /**
      * Compute a logical, reasonably efficient join on the specified tables. See
@@ -352,6 +351,7 @@ public class JoinOptimizer {
         String table1Alias = j.t1Alias;
         String table2Alias = j.t2Alias;
 
+        // 构建子集, 去除 removeNode
         Set<LogicalJoinNode> news = new HashSet<>(joinSet);
         news.remove(j);
 
@@ -360,6 +360,7 @@ public class JoinOptimizer {
         boolean leftPkey, rightPkey;
 
         if (news.isEmpty()) { // base case -- both are base relations
+            // 如果news 为空 , 说明是 base case, 我们只需要计算 removeNode 的代价就可以了
             prevBest = new ArrayList<>();
             t1cost = stats.get(table1Name).estimateScanCost();
             t1card = stats.get(table1Name).estimateTableCardinality(filterSelectivities.get(j.t1Alias));
@@ -370,6 +371,7 @@ public class JoinOptimizer {
             rightPkey = table2Alias != null && isPkey(table2Alias, j.f2PureName);
         } else {
             // news is not empty -- figure best way to join j to news
+            // 如果不为空, 先取出 news 的最优执行计划, 包括执行顺序和代价
             prevBest = pc.getOrder(news);
             // possible that we have not cached an answer, if subset
             // includes a cross product
@@ -380,7 +382,8 @@ public class JoinOptimizer {
             double prevBestCost = pc.getCost(news);
             int bestCard = pc.getCard(news);
 
-            // estimate cost of right subtree
+            // 如果 removeNode 的 left 包含在 prevBest 中
+            // 那么 card1 = news 的 bestCard
             if (doesJoin(prevBest, table1Alias)) { // j.t1 is in prevBest
                 t1cost = prevBestCost; // left side just has cost of whatever
                                        // left
@@ -410,7 +413,7 @@ public class JoinOptimizer {
             }
         }
 
-        // case where prevbest is left
+        // 计算 join 代价
         double cost1 = estimateJoinCost(j, t1card, t2card, t1cost, t2cost);
 
         LogicalJoinNode j2 = j.swapInnerOuter();

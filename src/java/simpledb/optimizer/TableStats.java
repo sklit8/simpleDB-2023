@@ -203,8 +203,15 @@ public class TableStats {
      * */
     public double avgSelectivity(int field, Predicate.Op op) {
         // some code goes here
-        return 1.0;
+        if (td.getFieldType(field).equals(Type.INT_TYPE)) {
+            IntHistogram intHistogram = (IntHistogram) histogramMap.get(field);
+            return intHistogram.avgSelectivity();
+        } else {
+            StringHistogram stringHistogram = (StringHistogram) histogramMap.get(field);
+            return stringHistogram.avgSelectivity();
+        }
     }
+
 
     /**
      * Estimate the selectivity of predicate <tt>field op constant</tt> on the
